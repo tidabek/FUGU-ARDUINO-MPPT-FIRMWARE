@@ -1,3 +1,5 @@
+#include "Pins.h"
+
 void backflowControl(){                                                 
   // PV BACKFLOW CONTROL (CHARGER MODE ONLY) 
    if((voltageInput > voltageOutput + voltageDropout) && (IUV == 0)){ 
@@ -53,8 +55,5 @@ void Device_Protection(){
       IUV = 0;                 // Normal daylight operation
     }
   }
-
-  // RUN BACKFLOW PROTECTION AT THE VERY END
-  // Moving this here ensures it uses the completely fresh, up-to-date IUV status calculated above
   backflowControl();                                                                                 
 }

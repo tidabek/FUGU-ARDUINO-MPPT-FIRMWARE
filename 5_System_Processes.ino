@@ -1,3 +1,5 @@
+#include "Pins.h"
+
 void System_Processes(){
   ///////////////// FAN COOLING /////////////////
   if (enableFan == 1) {
@@ -187,7 +189,7 @@ void runSetupWizard() {
     else if (battType == 1) lcd.print("Li-Ion 3S     ");
     else if (battType == 2) lcd.print("AGM / Sealed  ");
     else if (battType == 3) lcd.print("Flooded Lead  ");
-    else if (battType == 4) lcd.print("Custom / Skip ");
+    else if (battType == 4) lcd.print("Custom        ");
 
     if(digitalRead(buttonRight) == 1) {
       while(digitalRead(buttonRight) == 1) {}
@@ -226,19 +228,82 @@ void runSetupWizard() {
     if(digitalRead(buttonSelect) == 1) {
       while(digitalRead(buttonSelect) == 1) {}
       
-      // Compute thresholds and save them to EEPROM immediately!
+      // Compute thresholds and save them immediately!
       applyBatteryPreset(battType, sysVolts);
-      saveSettings(); 
-      
-      savedMessageLCD();
+      updateBatteryProfile();
       wizardStep = 4; // Transition to Wi-Fi Setup
       lcd.clear();
     }
   }
+  // ================= STAGE 4: BATTERY CAPACITY =================
+  int longPressTime = 3000, longPressInterval = 500, shortPressInterval = 100;
+  while (wizardStep == 4){
+      lcd.setCursor(0,0);
+      lcd.print("BATTERY CAPACITY");
+      lcd.setCursor(0,1);
+      lcd.print("> ");
+      lcd.print(batteryCapacityAH);
+      lcd.print(" Ah    ");
 
-  // ================= STAGE 4: USE WI-FI PROMPT =================
+      // Increase
+      if(digitalRead(buttonRight)){
+          unsigned long pressStart = millis();
+          while(digitalRead(buttonRight)){
+              if(millis() - pressStart >= longPressTime){
+                  batteryCapacityAH += 10;
+                  if(batteryCapacityAH > 500)
+                      batteryCapacityAH = 500;
+                  delay(longPressInterval);
+              }
+              else{
+                  if(batteryCapacityAH < 500)
+                      batteryCapacityAH++;
+                  delay(shortPressInterval);
+              }
+              lcd.setCursor(2,1);
+              lcd.print("          ");
+              lcd.setCursor(2,1);
+              lcd.print(batteryCapacityAH);
+              lcd.print(" Ah");
+          }
+      }
+
+      // Decrease
+      if(digitalRead(buttonLeft)){
+          unsigned long pressStart = millis();
+          while(digitalRead(buttonLeft)){
+              if(millis() - pressStart >= longPressTime){
+                  if(batteryCapacityAH >= 20)
+                      batteryCapacityAH -= 10;
+                  delay(longPressInterval);
+              }
+              else{
+                  if(batteryCapacityAH > 10)
+                      batteryCapacityAH--;
+                  delay(shortPressInterval);
+              }
+              if(batteryCapacityAH < 10)
+                  batteryCapacityAH = 10;
+              lcd.setCursor(2,1);
+              lcd.print("          ");
+              lcd.setCursor(2,1);
+              lcd.print(batteryCapacityAH);
+              lcd.print(" Ah");
+          }
+      }
+      if(digitalRead(buttonSelect)){
+          while(digitalRead(buttonSelect));
+          updateBatteryProfile();
+          saveSettings();
+          savedMessageLCD();
+          wizardStep = 5;
+          lcd.clear();
+      }
+  }
+
+  // ================= STAGE 5: USE WI-FI PROMPT =================
   bool useWiFiSelection = true; // Default cursor on YES
-  while (wizardStep == 4) {
+  while (wizardStep == 5) {
     lcd.setCursor(0, 0); lcd.print("CONNECT TO WIFI?");
     lcd.setCursor(0, 1);
     if(useWiFiSelection) { lcd.print("   > YES    NO "); }
@@ -269,23 +334,23 @@ void runSetupWizard() {
           lcd.setCursor(0, 0); lcd.print("DATE SYNCED:   ");
           lcd.setCursor(0, 1); lcd.print(netDate);
           delay(2000);
-          wizardStep = 6; // Skip manual adjustments, jump straight to completion
+          wizardStep = 7; // Skip manual adjustments, jump straight to completion
         } else {
           lcd.setCursor(0,0); lcd.print("WIFI FAILED!    ");
           lcd.setCursor(0,1); lcd.print("GOING TO MANUAL ");
           delay(2000); lcd.clear();
-          wizardStep = 5; // Connection failed, route to manual setup
+          wizardStep = 6; // Connection failed, route to manual setup
         }
       } else {
         WIFI = 0; // Explicitly enforce offline status
-        wizardStep = 5; // Route directly to manual date entry
+        wizardStep = 6; // Route directly to manual date entry
       }
     }
   }
 
-  // ================= STAGE 5: MANUAL DATE PICKER =================
+  // ================= STAGE 6: MANUAL DATE PICKER =================
   int subStep = 0; // 0: Year, 1: Month, 2: Day
-  while (wizardStep == 5) {
+  while (wizardStep == 6) {
     lcd.setCursor(0, 0); lcd.print("SET START DATE: ");
     lcd.setCursor(0, 1);
     
@@ -326,12 +391,12 @@ void runSetupWizard() {
         stats.end();
         
         savedMessageLCD();
-        wizardStep = 6; // Progress to finalization block
+        wizardStep = 7; // Progress to finalization block
       }
     }
   }
 
-  // ================= STAGE 6: FINALIZE SYSTEM =================
+  // ================= STAGE 7: FINALIZE SYSTEM =================
   stats.begin("fugu-stats", false);
   stats.putBool("isFirstBoot", false); // Close down the wizard state permanently
   stats.end();
@@ -383,6 +448,7 @@ void factoryReset(){
   enableBluetooth = true;
   battPreset = 4; // Custom
   sysVoltage = 12;
+  batteryCapacityAH = 100;
   loadMode = 0;
   manualLoadState = 0;
   lvdDelay = 30000;
@@ -392,7 +458,7 @@ void factoryReset(){
 
   // 3. Inject Battery Architecture Defaults to RAM
   applyBatteryPreset(TYPE_AGM_SEALED, 12); 
-  
+    
   // 4. Save these perfectly clean RAM variables straight to NVS
   saveSettings(); 
 
@@ -421,6 +487,7 @@ void loadSettings(){
   voltageBatteryMax   = stats.getFloat("vBatMax", 14.40);
   voltageBatteryMin   = stats.getFloat("vBatMin", 10.00);
   voltageBatteryFloat = stats.getFloat("vBatFlt", 13.50);
+  batteryCapacityAH   = stats.getUInt("BattCap", 100);
   voltageLVD          = stats.getFloat("vLVD", 11.50);
   voltageLVR          = stats.getFloat("vLVR", 12.50);
   currentCharging     = stats.getFloat("iChg", 30.00);
@@ -447,6 +514,8 @@ void loadSettings(){
   if (sysVoltage != 12 && sysVoltage != 24 && sysVoltage != 48) sysVoltage = 12;
   if (lvdDelay > 254000) lvdDelay = 30000; 
   if (CC_Mode > 1) CC_Mode = 1;
+
+  updateBatteryProfile();
 }
 
 void saveSettings(){
@@ -454,6 +523,7 @@ void saveSettings(){
   stats.putFloat("vBatMax", voltageBatteryMax);
   stats.putFloat("vBatMin", voltageBatteryMin);
   stats.putFloat("vBatFlt", voltageBatteryFloat);
+  stats.putUInt("BattCap", batteryCapacityAH);
   stats.putFloat("vLVD", voltageLVD);
   stats.putFloat("vLVR", voltageLVR);
   stats.putFloat("iChg", currentCharging);
@@ -473,6 +543,7 @@ void saveSettings(){
   stats.putBool("ovrFan", overrideFan);
   stats.putBool("dynFan", enableDynamicCooling);
   stats.end();
+  updateBatteryProfile();
 }
 void saveAutoloadSettings(){
   stats.begin("fugu-cfg", false);

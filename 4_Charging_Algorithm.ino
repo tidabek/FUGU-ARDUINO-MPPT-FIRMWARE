@@ -1,4 +1,11 @@
+#include "Pins.h"
 extern unsigned long prevLCDMillis;
+const unsigned long MIN_ABS_TIME = 30UL * 60UL * 1000UL;   // 30 minutes
+const unsigned long SLEEP_DELAY_MS = 3UL * 60UL * 1000UL; // 3 minutes at < 0.3A before sleeping
+const float CV_HYSTERESIS = 0.02;
+float tailCurrentThresh = 2.00;
+float tailCurrentPercent = 0.02;
+unsigned long sleepStartMillis = 0;
 
 void buck_Enable(){                                                                  
   buckEnable = 1;
@@ -14,121 +21,149 @@ void buck_Disable(){
 }   
 
 void predictivePWM(){                                                                
-  // PATCH: Restored the enablePPWM bypass for high-resistance batteries
-  if (enablePPWM == 1) {
-    if(voltageInput <= 0){ PPWM = 0; }                      
-    else{ PPWM = (PPWM_margin * pwmMax * voltageOutput) / (100.00 * voltageInput); }              
-    PPWM = constrain(PPWM, 0, pwmMaxLimited);
-  } else {
-    PPWM = 0; // Forces a slow, gentle soft-start from zero
-  }
-} 
+  if(voltageInput <= 0){ PPWM = 0; }                      
+  else{ PPWM = (PPWM_margin * pwmMax * voltageOutput) / (100.00 * voltageInput); }              
+  PPWM = constrain(PPWM, 0, pwmMaxLimited);
+}   
 
 void PWM_Modulation(){
   predictivePWM();                                                   
-  if(chargingState == 0 && currentOutput < currentCharging && voltageOutput < voltageBatteryMax) {
-    // ACTIVE MPPT MODE: Safe to use PPWM floor for fast tracking
-    PWM = constrain(PWM, PPWM, pwmMaxLimited); 
+    if(chargingState == 0 && currentOutput < currentCharging && voltageOutput < voltageBatteryMax) {
+    PWM = constrain(PWM, PPWM, pwmMaxLimited);
   } else {
-    // CONSTANT VOLTAGE/CURRENT MODE: Allow PWM to drop to 0 to prevent spikes
-    PWM = constrain(PWM, 0, pwmMaxLimited);    
+    PWM = constrain(PWM, 0, pwmMaxLimited);
   }
-  // --- IR2104 GATE DRIVER SHOOT-THROUGH PROTECTION ---
-    if (PWM > 0 && PWM < 160) {
-    if (voltageOutput > voltageBatteryMax || (chargingState == 2 && voltageOutput > voltageBatteryFloat)) {
-       PWM = 0; 
-    } else {
-       PWM = 160; 
-    }
-  }
-  ledcWrite(buck_IN, PWM);
-  // Hardware-level safety: Cleanly disable the gate driver chip entirely if duty cycle is 0
-  if (PWM > 0) {
+  if (PWM <= 0) {
+    buck_Disable(); 
+    ledcWrite(buck_IN, 0);
+  } else {
+    ledcWrite(buck_IN, PWM);
     buck_Enable(); 
-  } else {
-    buck_Disable();
   }
 }
      
-void Charging_Algorithm(){
-static bool wasPaused = false; // Memory flag to track menu entry/exit
+void updateBatteryProfile(){
+    switch (battPreset){
+        // LiFePO4
+        case 0:
+            tailCurrentPercent = 0.05f;                 // 5%
+            absWindow = 1UL * 60UL * 1000UL;            // 1 minute
+            break;
+        // Lithium-Ion
+        case 1:
+            tailCurrentPercent = 0.05f;                 // 5%
+            absWindow = 5UL * 60UL * 1000UL;            // 5 minutes
+            break;
+        // AGM / Sealed
+        case 2:
+            tailCurrentPercent = 0.02f;                 // 2%
+            absWindow = 120UL * 60UL * 1000UL;          // 2 hours
+            break;
+        // Flooded Lead Acid
+        case 3:
+            tailCurrentPercent = 0.015f;                // 1.5%
+            absWindow = 180UL * 60UL * 1000UL;          // 3 hours
+            break;
+        // Custom
+        case 4:
+            // Keep user configured timer
+            if(tailCurrentPercent <= 0.0f)
+                tailCurrentPercent = 0.02f;
+            break;
+    }
+    tailCurrentThresh = batteryCapacityAH * tailCurrentPercent;
+}
 
-  if(ERR > 0 || chargingPause == 1){ 
-    buck_Disable();
-    if(chargingPause == 1) { wasPaused = true; } // Flag that we are in the menu
-  }               
+void Charging_Algorithm(){
+  
+  if(ERR > 0 || chargingPause == 1){ buck_Disable(); }               // ERROR PRESENT - Turn off MPPT buck 
   else{
-    // Combine IUV Recovery (REC) and Menu Resume (wasPaused) into one safe restart block
-    if(REC == 1 || wasPaused == true){                                                     
+    if(REC == 1){                                                    // IUV RECOVERY 
       REC = 0;
-      wasPaused = false; // Clear the flag
-      chargingState = 0;                                             
+      chargingState = 0;                                             // Reset charging state back to BULK/MPPT
       buck_Disable();
-      
-      lcd.setBacklight(HIGH);
-      lcd.setCursor(0,0);
-      lcd.print("POWER SOURCE    ");
-      lcd.setCursor(0,1); lcd.print("DETECTED        ");
-      Serial.println("> Resuming Tracking Algorithm...");
+      Serial.println("> Solar Panel Detected");
       Serial.print("> Computing For Predictive PWM ");
       for(int i = 0; i < 40; i++){ Serial.print("."); delay(30); }                        
       Serial.println("");
-      
       Read_Sensors();
       predictivePWM();
       PWM = PPWM; 
       lcd.clear();
       prevLCDMillis = 0;
     }  
-    else{           
+    else{            
       // ================= MPPT & MULTI-STAGE CHARGING ALGORITHM ================= //
       
       // --- 1. STATE TRANSITION LOGIC ---
+      float rechargeVoltage;
+      float standbyVoltage;
+
+      if (battPreset == 0 || battPreset == 1){
+        // Lithium Setup
+        rechargeVoltage = voltageBatteryFloat;        // e.g., 13.2V - 13.4V
+        standbyVoltage  = voltageBatteryFloat + 0.20; // Soft finish voltage (e.g., 13.6V)
+      }
+      else{
+        // Lead Acid Setup
+        rechargeVoltage = voltageBatteryFloat - 0.30;
+        standbyVoltage  = voltageBatteryFloat;
+      }
+
+      // STAGE 0: BULK -> ABSORPTION
       if (chargingState == 0) { 
-        // BULK -> ABSORPTION Transition
-        if (voltageOutput >= voltageBatteryMax) {
+        if (voltageOutput >= (voltageBatteryMax - CV_HYSTERESIS)) {
           chargingState = 1;
           absStartMillis = millis();
         }
       }
+      // STAGE 1: ABSORPTION -> FINISH / FLOAT
       else if (chargingState == 1) { 
-        // ABSORPTION -> NEXT STAGE Transition 
-        if ((millis() - absStartMillis >= absWindow) || (currentOutput < tailCurrentThresh && currentOutput > 0.05)) {
-          
-          // *** CHEMISTRY BRANCHING LOGIC ***
-          if (battPreset == 0 || battPreset == 1) { 
-            chargingState = 3; // LITHIUM: Terminate charge completely
+        unsigned long absElapsed = millis() - absStartMillis;
+        bool minTimeReached = (absElapsed >= MIN_ABS_TIME);
+        bool maxTimeReached = (absElapsed >= absWindow);
+        bool tailReached    = (currentOutput <= tailCurrentThresh) && (currentOutput > 0.05);
+
+        if ((minTimeReached && tailReached) || maxTimeReached) {
+          if (battPreset == 0 || battPreset == 1) {
+            chargingState = 3; // LITHIUM: Skip float, go directly to SLEEP/OFF
           } else {
-            chargingState = 2; // LEAD-ACID / CUSTOM: Enter Float Mode
+            chargingState = 2; // LEAD ACID: Move to Finish/Standby (Float) stage
           }
-          
+          sleepStartMillis = millis();
         }
+
         // Safety Dropback to Bulk
-        if (voltageOutput < (voltageBatteryMax - 1.0000)) {
+        if (voltageOutput < (voltageBatteryMax - 0.25)) {
           chargingState = 0;
         }
       }
+      // STAGE 2: FINISH / STANDBY (LEAD-ACID ONLY)
       else if (chargingState == 2) {
-        // FLOAT -> RE-BULK Transition (Lead-Acid)
-        if (voltageOutput < (voltageBatteryFloat - 0.5000)) {
+        // Re-bulk trigger
+        if (voltageOutput < rechargeVoltage) {
           chargingState = 0;
         }
       }
+      // STAGE 3: SOFT SLEEP / TERMINATION
       else if (chargingState == 3) {
-        // TERMINATED -> RE-BULK Transition (Lithium)
-        // Repurposes the "Float" variable to act as the Restart threshold
-        if (voltageOutput < voltageBatteryFloat) {
+        // Smoothly step down PWM before full shutdown
+        if (PWM > 0) {
+          PWM--;
+        }
+        
+        // Restart condition
+        if (voltageOutput < rechargeVoltage) {
           chargingState = 0;
         }
       }
 
       // --- 2. STATE EXECUTION LOGIC ---
       if (chargingState == 0) {                                                    
-        // STATE 0: BULK STAGE (MPPT TRACKING)
+        // BULK STAGE (MPPT TRACKING)
         if(currentOutput > currentCharging)                         {PWM--;}                           
         else if(voltageOutput > voltageBatteryMax)                  {PWM--;}                           
         else{                    
-          // MPPT P&O ALGORITHM
           if(powerInput > powerInputPrev && voltageInput > voltageInputPrev)        {PWM--;}  
           else if(powerInput > powerInputPrev && voltageInput < voltageInputPrev)   {PWM++;} 
           else if(powerInput < powerInputPrev && voltageInput > voltageInputPrev)   {PWM++;}  
@@ -140,26 +175,23 @@ static bool wasPaused = false; // Memory flag to track menu entry/exit
         }   
       }
       else if (chargingState == 1) {                                               
-        // STATE 1: ABSORPTION STAGE 
-        if(currentOutput > currentCharging)          {PWM--;}        
-        else if(voltageOutput > voltageBatteryMax)   {PWM--;}                           
-        else if(voltageOutput < voltageBatteryMax)   {PWM++;}                          
-        else{}
+        // ABSORPTION STAGE
+        if(currentOutput > currentCharging)                          {PWM--;}        
+        else if(voltageOutput > voltageBatteryMax + CV_HYSTERESIS)   {PWM--;}                           
+        else if(voltageOutput < voltageBatteryMax - CV_HYSTERESIS)   {PWM++;}                          
       }
       else if (chargingState == 2) {                                               
-        // STATE 2: FLOAT STAGE (LEAD-ACID ONLY)
-        if(currentOutput > currentCharging)          {PWM--;}  
-        else if(voltageOutput > voltageBatteryFloat) {PWM--;}                   
-        else if(voltageOutput < voltageBatteryFloat) {PWM++;}                         
-        else{}
+        // FINISH / STANDBY STAGE
+        if(currentOutput > currentCharging)                          {PWM--;}  
+        else if(voltageOutput > standbyVoltage + CV_HYSTERESIS)      {PWM--;}                   
+        else if(voltageOutput < standbyVoltage - CV_HYSTERESIS)      {PWM++;}                         
       }
       else if (chargingState == 3) {
-        // STATE 3: CHARGE TERMINATION (LITHIUM ONLY)
-        // Set PWM to 0. The PWM_Modulation() function will automatically execute buck_Disable()
-        PWM = 0;
+        // SLEEP STAGE
+        // Handled by PWM ramp-down above and automatic buck_Disable() inside PWM_Modulation()
       }
       
-      PWM_Modulation(); // Execute PWM                                                                      
+      PWM_Modulation(); // Execute PWM Modulation & Driver Control                                                                      
     }  
   }
 }

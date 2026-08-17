@@ -155,7 +155,7 @@ void LCD_Menu(){
       
       // ---------- CATEGORY 0: BATTERY SETTINGS ---------- //
       if(menuPage == 0) {
-        int maxItems = (battPreset == 4) ? 3 : 0; 
+        int maxItems = (battPreset == 4) ? 4 : 1; 
         if(digitalRead(buttonRight) == 1 && menuLevel == 2) { subMenuPage++; if(subMenuPage>maxItems) subMenuPage=0; while(digitalRead(buttonRight)==1){} lcd.clear(); return; }
         if(digitalRead(buttonLeft) == 1 && menuLevel == 2)  { subMenuPage--; if(subMenuPage<0) subMenuPage=maxItems; while(digitalRead(buttonLeft)==1){} lcd.clear(); return; }
 
@@ -199,7 +199,85 @@ void LCD_Menu(){
             }
           }
         }
-        else if(subMenuPage == 1) {
+        else if(subMenuPage == 1)        {
+            lcd.setCursor(0,0);
+            lcd.print("BATTERY CAPACITY");
+            lcd.setCursor(0,1);
+
+            if(menuLevel==3) lcd.print(">");
+            else             lcd.print("=");
+
+            lcd.print(batteryCapacityAH);
+            lcd.print(" Ah   ");
+
+            if(menuLevel==2 && digitalRead(buttonSelect)==1){
+                menuLevel=3;
+                while(digitalRead(buttonSelect)==1){}
+                return;
+            }
+
+            else if(menuLevel==3){
+                if(digitalRead(buttonRight)==1){
+                    unsigned long pTime=millis();
+                    while(digitalRead(buttonRight)==1){
+                        if(millis()-pTime>=longPressTime){
+                          if (batteryCapacityAH < 500){
+                            batteryCapacityAH+=10;
+                            if (batteryCapacityAH > 500)
+                                batteryCapacityAH = 500;
+                          }
+                            delay(longPressInterval);
+                        }
+                        else{
+                          if (batteryCapacityAH < 500)
+                            batteryCapacityAH++;
+                            delay(shortPressInterval);
+                        }
+
+                        lcd.setCursor(1,1);
+                        lcd.print("     ");
+                        lcd.setCursor(1,1);
+                        lcd.print(batteryCapacityAH);
+                        lcd.print(" Ah");
+                    }
+                }
+
+                if(digitalRead(buttonLeft)==1){
+                    unsigned long pTime=millis();
+
+                    while(digitalRead(buttonLeft)==1){
+                        if(millis()-pTime>=longPressTime){
+                          if (batteryCapacityAH > 10){
+                            batteryCapacityAH-=10;
+                            if (batteryCapacityAH < 10)
+                                batteryCapacityAH = 10;
+                          }
+                            delay(longPressInterval);
+                        }
+                        else{
+                          if (batteryCapacityAH > 10)
+                            batteryCapacityAH--;
+                            delay(shortPressInterval);
+                        }
+
+                        lcd.setCursor(1,1);
+                        lcd.print("     ");
+                        lcd.setCursor(1,1);
+                        lcd.print(batteryCapacityAH);
+                        lcd.print(" Ah");
+                    }
+                }
+
+                if(digitalRead(buttonSelect)==1){
+                    while(digitalRead(buttonSelect)==1){}
+                    saveSettings();
+                    savedMessageLCD();
+                    menuLevel=2;                    
+                    return;
+                }
+            }
+        }
+        else if(subMenuPage == 2) {
           lcd.setCursor(0,0); lcd.print("BATTERY MAX     ");
           lcd.setCursor(0,1); if(menuLevel==3) lcd.print(">"); else lcd.print("="); lcd.print(voltageBatteryMax,2); lcd.print("V   ");
           if(menuLevel == 2 && digitalRead(buttonSelect)==1) { menuLevel=3; while(digitalRead(buttonSelect)==1){} return; }
@@ -221,7 +299,7 @@ void LCD_Menu(){
             if(digitalRead(buttonSelect)==1){ while(digitalRead(buttonSelect)==1){} saveSettings(); menuLevel=2; savedMessageLCD(); return; }
           }
         }
-        else if(subMenuPage == 2) {
+        else if(subMenuPage == 3) {
           lcd.setCursor(0,0); lcd.print("BATTERY FLOAT   ");
           lcd.setCursor(0,1); if(menuLevel==3) lcd.print(">"); else lcd.print("="); lcd.print(voltageBatteryFloat,2); lcd.print("V   ");
           if(menuLevel == 2 && digitalRead(buttonSelect)==1) { menuLevel=3; while(digitalRead(buttonSelect)==1){} return; }
@@ -243,7 +321,7 @@ void LCD_Menu(){
             if(digitalRead(buttonSelect)==1){ while(digitalRead(buttonSelect)==1){} saveSettings(); menuLevel=2; savedMessageLCD(); return; }
           }
         }
-        else if(subMenuPage == 3) {
+        else if(subMenuPage == 4) {
           lcd.setCursor(0,0); lcd.print("BATTERY MIN     ");
           lcd.setCursor(0,1); if(menuLevel==3) lcd.print(">"); else lcd.print("="); lcd.print(voltageBatteryMin,2); lcd.print("V   ");
           if(menuLevel == 2 && digitalRead(buttonSelect)==1) { menuLevel=3; while(digitalRead(buttonSelect)==1){} return; }

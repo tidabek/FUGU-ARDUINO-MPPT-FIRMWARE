@@ -1,3 +1,5 @@
+#include "Pins.h"
+
 void ADC_SetGain(){
   if      (ADC_GainSelect == 0) { ads.setGain(GAIN_TWOTHIRDS); ADC_BitReso = 0.1875; } 
   else if (ADC_GainSelect == 1) { ads.setGain(GAIN_ONE);      ADC_BitReso = 0.125;  } 
@@ -36,8 +38,8 @@ void Read_Sensors(){
 
   //VOLTAGE SENSOR - Instantenous Averaging   
   for(int i = 0; i<avgCountVS; i++){
-    VSI = VSI + ads.computeVolts(ads.readADC_SingleEnded(3));
-    VSO = VSO + ads.computeVolts(ads.readADC_SingleEnded(1));
+    VSI = VSI + ads.computeVolts(ads.readADC_SingleEnded(ADS_SOLAR_V_CHAN));
+    VSO = VSO + ads.computeVolts(ads.readADC_SingleEnded(ADS_BATT_V_CHAN));
   }
   voltageInput  = (VSI/avgCountVS)*inVoltageDivRatio; 
   voltageOutput = (VSO/avgCountVS)*outVoltageDivRatio; 
@@ -45,7 +47,7 @@ void Read_Sensors(){
   
   //CURRENT SENSOR - Instantenous Averaging   
   for(int i = 0; i<avgCountCS; i++){
-    CSI = CSI + ads.computeVolts(ads.readADC_SingleEnded(2));
+    CSI = CSI + ads.computeVolts(ads.readADC_SingleEnded(ADS_CURRENT_CHAN));
   }
   CSI_converted = (CSI/avgCountCS)*1.3300;
   currentInput  = ((CSI_converted-currentMidPoint)*-1)/currentSensV;  

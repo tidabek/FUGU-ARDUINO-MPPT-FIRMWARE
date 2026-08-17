@@ -1,18 +1,17 @@
 #define BLYNK_TEMPLATE_ID "TMPL3EnLIFxE"
 #define BLYNK_TEMPLATE_NAME "Fugu MPPT"
-#define FIRMWARE_VERSION "2.3-beta"            //8 characters
-#define BLYNK_FIRMWARE_VERSION "2.4-beta"      //8 characters
-char
-blynk_auth[40]      = "your_blynk_auth";
-bool
-shouldSaveConfig    = false;
+#define FIRMWARE_VERSION "2.8-beta"            //8 characters
+#define BLYNK_FIRMWARE_VERSION "2.8-beta"      //8 characters
+#define BLYNK_PRINT Serial
+char blynk_auth[40]      = "your_blynk_auth";
+bool shouldSaveConfig    = false;
 
 //================================ MPPT FIRMWARE LCD MENU INFO =====================================//
 // The lines below are for the Firmware Version info displayed on the MPPT's LCD Menu Interface     //
 //==================================================================================================//
 String 
 firmwareInfo      = FIRMWARE_VERSION,
-firmwareDate      = "06/23/26",
+firmwareDate      = "08/17/26",
 firmwareContactR1 = "www.youtube.com/",  
 firmwareContactR2 = "TechBuilder     ",
 startDate         = "2026-01-01";
@@ -39,6 +38,7 @@ wizardDay         = 1;
 #include <WiFiClientSecure.h>       //SYSTEM PARAMETER  -
 #include <HTTPClient.h>             //SYSTEM PARAMETER  -
 #include <Update.h>                 //SYSTEM PARAMETER  -
+#include "Pins.h"                   //SYSTEM PARAMETER  -
 Preferences stats;                  //SYSTEM PARAMETER  -
 LiquidCrystal_I2C lcd(0x27,16,2);   //SYSTEM PARAMETER  - Configure LCD RowCol Size and I2C Address
 TaskHandle_t Core2;                 //SYSTEM PARAMETER  - Used for the ESP32 dual core operation
@@ -51,21 +51,9 @@ BlynkTimer blynkTimer;
 // been set or saved through the LCD menu interface or mobile phone WiFi app. Some parameters here  //
 // would allow you to override or unlock features for advanced users (settings not on the LCD menu) //
 //==================================================================================================//
-#define backflow_MOSFET 27          //SYSTEM PARAMETER - Backflow MOSFET
-#define buck_IN         33          //SYSTEM PARAMETER - Buck MOSFET Driver PWM Pin
-#define buck_EN         32          //SYSTEM PARAMETER - Buck MOSFET Driver Enable Pin
-#define LED             2           //SYSTEM PARAMETER - LED Indicator GPIO Pin
-#define FAN             16          //SYSTEM PARAMETER - Fan GPIO Pin
 #define FAN_FREQ        5000        //SYSTEM PARAMETER - 5kHz PWM Frequency
 #define FAN_RESOLUTION  8           //SYSTEM PARAMETER - 8-bit resolution (0-255 scaling)
-#define ADC_ALERT       34          //SYSTEM PARAMETER - 
-#define TempSensor      35          //SYSTEM PARAMETER - Temperature Sensor GPIO Pin
-#define Load            12
-#define buttonLeft      18          //SYSTEM PARAMETER - 
-#define buttonRight     17          //SYSTEM PARAMETER -
-#define buttonBack      19          //SYSTEM PARAMETER - 
-#define buttonSelect    23          //SYSTEM PARAMETER -
-#define BLYNK_PRINT Serial
+
 
 //====================================== USER PARAMETERS ==========================================//
 // The parameters below are the default parameters used when the MPPT charger settings have not    //
@@ -75,7 +63,7 @@ BlynkTimer blynkTimer;
 bool                                  
 MPPT_Mode               = 1,           //   USER PARAMETER - MPPT Tracking Algorithm active 
 output_Mode             = 1,           //   USER PARAMETER - Charger Mode  
-CC_Mode                 = 0,           //   USER PARAMETER - 1 = Limit Current, 0 = Max Harvest
+CC_Mode                 = 1,           //   USER PARAMETER - 1 = Limit Current, 0 = Max Harvest
 disableFlashAutoLoad    = 0,           //   USER PARAMETER - Forces the MPPT to not use flash saved settings, enabling this "1" defaults to programmed firmware settings.
 enablePPWM              = 1,           //   USER PARAMETER - Enables Predictive PWM, this accelerates regulation speed (only applicable for battery charging application)
 enableWiFi              = 1,           //   USER PARAMETER - Enable WiFi Connection
@@ -117,6 +105,9 @@ currentCharging         = 30.0000,     //   USER PARAMETER - Maximum Charging Cu
 electricalPrice         = 9.5000,      //   USER PARAMETER - Input electrical price per kWh (Dollar/kWh,Euro/kWh,Peso/kWh)
 lifetimeKwh             = 0.0;         //   USER PARAMETER - Lifetime harvested KW
 
+uint16_t
+batteryCapacityAH       = 100;         //   USER PARAMETER - Battery capacity. This will be used to calculate for tailCurrentThresh
+
 unsigned long
 lvdDelay                = 30000;       //   USER PARAMETER - 30 Second debounce timer for heavy inverter loads
 
@@ -126,8 +117,7 @@ chargingState           = 0;           // SYSTEM PARAMETER - 0 = BULK(MPPT), 1 =
 unsigned long
 absStartMillis          = 0,           // SYSTEM PARAMETER - Tracks when absorption phase started
 absWindow               = 7200000;     // USER PARAMETER - Absorption duration (e.g., 2 hours in ms)
-float
-tailCurrentThresh       = 0.5000;      // USER PARAMETER - Current threshold to finish absorption (Amps)
+
 
 //================================== CALIBRATION PARAMETERS =======================================//
 // The parameters below can be tweaked for designing your own MPPT charge controllers. Only modify //
@@ -315,7 +305,7 @@ void setup() {
   bool isFirstBoot = stats.getBool("isFirstBoot", true);
   startDate = stats.getString("startDate", "2025-01-01");
   ADS1015_Mode = stats.getBool("is1015", 0);
-  String bAuth = stats.getString("bAuth", "dummy_auth");
+  String bAuth = stats.getString("bAuth", "your_blynk_auth");
   strcpy(blynk_auth, bAuth.c_str());
   stats.end();
 
