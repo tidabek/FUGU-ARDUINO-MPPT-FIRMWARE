@@ -162,3 +162,17 @@ June 15, 2026
 June 23, 2026
 
 * Patched a bug that prevents charging in Lead Acid/Flooded batteries.
+
+August 17, 2026
+
+* Dynamic Tail Current for Lead-Acid Chemistries: Introduced a configurable Battery Capacity (Ah) parameter. The firmware now dynamically calculates precise tail current thresholds, ensuring the Absorption-to-Float transition happens at the perfect saturation point to prevent sulfation or electrolyte boiling.
+
+* Expanded Setup Wizard: The LCD setup wizard and settings menu have been updated to include the new Battery Capacity parameter for seamless user configuration.
+
+* Optimized Lithium Charging Profile: Completely overhauled the multi-stage logic for Lithium battery presets. The algorithm now strictly prevents continuous Float charging, safely skipping from Absorption directly into a Sleep/Termination phase to prevent lithium plating and maximize cell lifespan.
+
+* Soft PWM Ramp-Down: Added a smooth step-down routine for the PWM output during the Lithium Sleep/Termination stage. This gradual reduction prevents sudden inductive kickback and voltage spikes before the buck converter is fully disabled.
+
+* Hardware Abstraction via Pins.h: Extracted all pin definitions into a dedicated Pins.h header file. This streamlines the codebase and makes it significantly easier to port the firmware or switch between different microcontroller boards and hardware revisions.
+
+* Critical MOSFET Protection: Resolved a severe synchronous buck switching bug. Addressed the dead-time/shoot-through issue during state transitions that previously caused the low-side MOSFET to fail.
