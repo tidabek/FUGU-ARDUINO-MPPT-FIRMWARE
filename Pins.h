@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================
-// HARDWARE PIN DEFINITIONS: VIETNAMESE PCB (4EVN MPPT V2)
+// HARDWARE PIN DEFINITIONS
 // ============================================================================
 
 // Drivers & Switching Stage
